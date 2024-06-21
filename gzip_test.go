@@ -297,3 +297,34 @@ func TestSizeUnderThreshold(t *testing.T) {
 	assert.Equal(t, w.Body.String(), testResponse)
 	assert.Equal(t, fmt.Sprint(w.Body.Len()), w.Header().Get("Content-Length"))
 }
+
+func TestThresholdMultipleWrites(t *testing.T) {
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/", nil)
+	req.Header.Add("Accept-Encoding", "gzip")
+
+	router := gin.New()
+	router.Use(Gzip(DefaultCompression, WithCompressionSizeThreshold(len(testResponse)+1)))
+	router.GET("/", func(c *gin.Context) {
+		c.Header("Content-Length", strconv.Itoa(len(testResponse)))
+		_, _ = c.Writer.Write([]byte(testResponse))
+		_, _ = c.Writer.Write([]byte(testResponse))
+		c.Status(200)
+	})
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, w.Code, 200)
+	assert.Equal(t, w.Header().Get("Content-Encoding"), "gzip")
+	assert.Equal(t, w.Header().Get("Vary"), "Accept-Encoding")
+	assert.NotEqual(t, w.Header().Get("Content-Length"), "0")
+	assert.NotEqual(t, w.Body.Len(), len(testResponse)*2)
+	assert.Equal(t, fmt.Sprint(w.Body.Len()), w.Header().Get("Content-Length"))
+
+	gr, err := gzip.NewReader(w.Body)
+	assert.NoError(t, err)
+	defer gr.Close()
+
+	body, _ := io.ReadAll(gr)
+	assert.Equal(t, string(body), testResponse+testResponse)
+}

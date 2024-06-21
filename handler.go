@@ -79,10 +79,6 @@ func (g *gzipHandler) Handle(c *gin.Context) {
 		}
 		c.Writer = tw
 		defer func() {
-			if tw.isCompressed() {
-				c.Header("Content-Encoding", "gzip")
-				c.Header("Vary", "Accept-Encoding")
-			}
 			tw.Close()
 			c.Header("Content-Length", fmt.Sprint(c.Writer.Size()))
 		}()

@@ -82,6 +82,9 @@ func (t *thresholdWriter) doWrite(data []byte) (int, error) {
 
 	shouldCompress := t.buffer.Len()+len(data) >= t.handler.CompressionSizeThreshold
 	if shouldCompress {
+		t.ResponseWriter.Header().Set("Content-Encoding", "gzip")
+		t.ResponseWriter.Header().Set("Vary", "Accept-Encoding")
+
 		t.gz = t.handler.gzPool.Get().(*gzip.Writer)
 		t.gz.Reset(t.ResponseWriter)
 		n, err := t.gz.Write(t.buffer.Bytes())
