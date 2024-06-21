@@ -1,4 +1,4 @@
-module github.com/gin-contrib/gzip
+module github.com/SecondQuestCorp/gzip
 
 go 1.18
 
