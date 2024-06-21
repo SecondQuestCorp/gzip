@@ -1,9 +1,10 @@
 package gzip
 
 import (
+	"bytes"
 	"compress/gzip"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -14,7 +15,8 @@ import (
 
 type gzipHandler struct {
 	*Options
-	gzPool sync.Pool
+	gzPool     sync.Pool
+	bufferPool sync.Pool
 }
 
 func newGzipHandler(level int, options ...Option) *gzipHandler {
@@ -22,7 +24,7 @@ func newGzipHandler(level int, options ...Option) *gzipHandler {
 		Options: DefaultOptions,
 		gzPool: sync.Pool{
 			New: func() interface{} {
-				gz, err := gzip.NewWriterLevel(ioutil.Discard, level)
+				gz, err := gzip.NewWriterLevel(io.Discard, level)
 				if err != nil {
 					panic(err)
 				}
@@ -33,6 +35,13 @@ func newGzipHandler(level int, options ...Option) *gzipHandler {
 	for _, setter := range options {
 		setter(handler.Options)
 	}
+
+	handler.bufferPool.New = func() interface{} {
+		b := new(bytes.Buffer)
+		b.Grow(handler.CompressionSizeThreshold)
+		return b
+	}
+
 	return handler
 }
 
@@ -45,18 +54,40 @@ func (g *gzipHandler) Handle(c *gin.Context) {
 		return
 	}
 
-	gz := g.gzPool.Get().(*gzip.Writer)
-	defer g.gzPool.Put(gz)
-	defer gz.Reset(ioutil.Discard)
-	gz.Reset(c.Writer)
+	if g.CompressionSizeThreshold <= 0 {
+		gz := g.gzPool.Get().(*gzip.Writer)
+		defer g.gzPool.Put(gz)
+		defer gz.Reset(io.Discard)
+		gz.Reset(c.Writer)
 
-	c.Header("Content-Encoding", "gzip")
-	c.Header("Vary", "Accept-Encoding")
-	c.Writer = &gzipWriter{c.Writer, gz}
-	defer func() {
-		gz.Close()
-		c.Header("Content-Length", fmt.Sprint(c.Writer.Size()))
-	}()
+		c.Header("Content-Encoding", "gzip")
+		c.Header("Vary", "Accept-Encoding")
+		c.Writer = &gzipWriter{c.Writer, gz}
+		defer func() {
+			gz.Close()
+			c.Header("Content-Length", fmt.Sprint(c.Writer.Size()))
+		}()
+	} else {
+		buffer := g.bufferPool.Get().(*bytes.Buffer)
+		defer g.bufferPool.Put(buffer)
+		defer buffer.Reset()
+
+		tw := &thresholdWriter{
+			ResponseWriter: c.Writer,
+			handler:        g,
+			buffer:         buffer,
+		}
+		c.Writer = tw
+		defer func() {
+			if tw.isCompressed() {
+				c.Header("Content-Encoding", "gzip")
+				c.Header("Vary", "Accept-Encoding")
+			}
+			tw.Close()
+			c.Header("Content-Length", fmt.Sprint(c.Writer.Size()))
+		}()
+	}
+
 	c.Next()
 }
 

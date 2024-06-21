@@ -19,10 +19,11 @@ var (
 )
 
 type Options struct {
-	ExcludedExtensions   ExcludedExtensions
-	ExcludedPaths        ExcludedPaths
-	ExcludedPathesRegexs ExcludedPathesRegexs
-	DecompressFn         func(c *gin.Context)
+	ExcludedExtensions       ExcludedExtensions
+	ExcludedPaths            ExcludedPaths
+	ExcludedPathesRegexs     ExcludedPathesRegexs
+	DecompressFn             func(c *gin.Context)
+	CompressionSizeThreshold CompressionSizeThreshold
 }
 
 type Option func(*Options)
@@ -48,6 +49,12 @@ func WithExcludedPathsRegexs(args []string) Option {
 func WithDecompressFn(decompressFn func(c *gin.Context)) Option {
 	return func(o *Options) {
 		o.DecompressFn = decompressFn
+	}
+}
+
+func WithCompressionSizeThreshold(threshold int) Option {
+	return func(o *Options) {
+		o.CompressionSizeThreshold = threshold
 	}
 }
 
@@ -100,6 +107,8 @@ func (e ExcludedPathesRegexs) Contains(requestURI string) bool {
 	}
 	return false
 }
+
+type CompressionSizeThreshold = int
 
 func DefaultDecompressHandle(c *gin.Context) {
 	if c.Request.Body == nil {
