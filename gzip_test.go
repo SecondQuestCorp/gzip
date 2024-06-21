@@ -5,7 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -81,7 +81,7 @@ func TestGzip(t *testing.T) {
 	assert.NoError(t, err)
 	defer gr.Close()
 
-	body, _ := ioutil.ReadAll(gr)
+	body, _ := io.ReadAll(gr)
 	assert.Equal(t, string(body), testResponse)
 }
 
@@ -170,7 +170,7 @@ func TestGzipWithReverseProxy(t *testing.T) {
 	assert.NoError(t, err)
 	defer gr.Close()
 
-	body, _ := ioutil.ReadAll(gr)
+	body, _ := io.ReadAll(gr)
 	assert.Equal(t, string(body), testReverseResponse)
 }
 
@@ -246,4 +246,54 @@ func TestDecompressGzipWithIncorrectData(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestSizeEqualToThreshold(t *testing.T) {
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/", nil)
+	req.Header.Add("Accept-Encoding", "gzip")
+
+	router := gin.New()
+	router.Use(Gzip(DefaultCompression, WithCompressionSizeThreshold(len(testResponse))))
+	router.GET("/", func(c *gin.Context) {
+		c.Header("Content-Length", strconv.Itoa(len(testResponse)))
+		c.String(200, testResponse)
+	})
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, w.Code, 200)
+	assert.Equal(t, w.Header().Get("Content-Encoding"), "gzip")
+	assert.Equal(t, w.Header().Get("Vary"), "Accept-Encoding")
+	assert.NotEqual(t, w.Header().Get("Content-Length"), "0")
+	assert.NotEqual(t, w.Body.Len(), 19)
+	assert.Equal(t, fmt.Sprint(w.Body.Len()), w.Header().Get("Content-Length"))
+
+	gr, err := gzip.NewReader(w.Body)
+	assert.NoError(t, err)
+	defer gr.Close()
+
+	body, _ := io.ReadAll(gr)
+	assert.Equal(t, string(body), testResponse)
+}
+
+func TestSizeUnderThreshold(t *testing.T) {
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/", nil)
+	req.Header.Add("Accept-Encoding", "gzip")
+
+	router := gin.New()
+	router.Use(Gzip(DefaultCompression, WithCompressionSizeThreshold(len(testResponse)+1)))
+	router.GET("/", func(c *gin.Context) {
+		c.Header("Content-Length", strconv.Itoa(len(testResponse)))
+		c.String(200, testResponse)
+	})
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, w.Code, 200)
+	assert.Equal(t, w.Header().Get("Content-Encoding"), "")
+	assert.Equal(t, w.Header().Get("Vary"), "")
+	assert.Equal(t, w.Body.String(), testResponse)
+	assert.Equal(t, fmt.Sprint(w.Body.Len()), w.Header().Get("Content-Length"))
 }
